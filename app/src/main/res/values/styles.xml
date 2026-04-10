@@ -1,0 +1,12 @@
+<resources>
+    <style name="Theme.XrayAndroidClient" parent="Theme.MaterialComponents.DayNight.NoActionBar">
+        <item name="colorPrimary">@color/brand_primary</item>
+        <item name="colorPrimaryVariant">@color/brand_primary_dark</item>
+        <item name="colorOnPrimary">@android:color/white</item>
+        <item name="colorSurface">@color/card_surface</item>
+        <item name="colorOnSurface">@color/brand_ink</item>
+        <item name="android:statusBarColor">@color/brand_background</item>
+        <item name="android:windowBackground">@color/brand_background</item>
+        <item name="colorAccent">@color/brand_primary</item>
+    </style>
+</resources>

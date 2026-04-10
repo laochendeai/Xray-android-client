@@ -1,0 +1,9 @@
+<resources>
+    <color name="brand_background">#F3F5EF</color>
+    <color name="brand_ink">#182018</color>
+    <color name="brand_muted">#5D675C</color>
+    <color name="card_surface">#FFFDF7</color>
+    <color name="card_stroke">#D4DBCC</color>
+    <color name="brand_primary">#285943</color>
+    <color name="brand_primary_dark">#1E4433</color>
+</resources>

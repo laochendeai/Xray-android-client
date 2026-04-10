@@ -1,0 +1,40 @@
+# OS / editors
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Android / Gradle
+.gradle/
+local.properties
+captures/
+*.iml
+
+# Build outputs
+build/
+app/build/
+out/
+release/
+artifacts/
+*.apk
+*.aab
+
+# Signing / secrets
+*.jks
+*.keystore
+keystore.properties
+.env
+.env.*
+!.env.example
+
+# Logs / temp
+*.log
+tmp/
+temp/
+cache/
+checkpoints/
+brainstorm/
+brainstorm*.md
+brainstorm*.json

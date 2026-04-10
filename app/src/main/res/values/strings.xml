@@ -1,0 +1,10 @@
+<resources>
+    <string name="app_name">Xray Android Client</string>
+    <string name="home_title">独立 Android 客户端</string>
+    <string name="home_summary">当前仓库已与核心仓库分离，先提供独立 app 骨架、调试构建与后续移动端功能落点。</string>
+    <string name="status_label">当前状态</string>
+    <string name="status_value">Bootstrap Ready</string>
+    <string name="action_import">导入订阅</string>
+    <string name="action_pool">查看节点池</string>
+    <string name="action_gateway">透明网关</string>
+</resources>

@@ -1,0 +1,50 @@
+name: bug report
+description: 提交 Android 客户端问题
+title: "[Bug]: "
+labels:
+  - bug
+body:
+  - type: checkboxes
+    attributes:
+      label: 完整性检查
+      options:
+        - label: 我已经确认问题发生在最新代码或最新构建上
+          required: true
+        - label: 我已经搜索过现有 issues，没有发现重复问题
+          required: true
+        - label: 我会提供可复现步骤，而不是只描述现象
+          required: true
+  - type: textarea
+    id: summary
+    attributes:
+      label: 问题描述
+      description: 说明发生了什么，预期是什么。
+      placeholder: 例如：导入订阅后应用闪退，预期应提示解析失败而不是直接退出。
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: 重现步骤
+      description: 按顺序写出复现方法。
+      placeholder: |
+        1. 打开应用
+        2. 点击某个入口
+        3. 输入某个订阅
+        4. 看到错误现象
+    validations:
+      required: true
+  - type: textarea
+    id: env
+    attributes:
+      label: 环境信息
+      description: 系统版本、设备型号、构建版本、是否本地 debug 包等。
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: 日志或截图
+      description: 粘贴 logcat、崩溃栈或提供截图。
+    validations:
+      required: false

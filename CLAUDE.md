@@ -27,13 +27,14 @@ This repository uses Codex/Claude as an execution agent, not just a chat assista
 
 ```bash
 ./scripts/build-debug-apk.sh
+./scripts/build-release-apk.sh
 ```
 
 ## Architecture Boundaries
 
 - `app/` 是唯一 Android application module，先保持单模块，避免过早拆分。
 - 当前仓库只负责 Android 客户端 UI、配置导入、节点展示与后续移动端运行控制。
-- Xray core 二进制集成、签名发布、商店分发暂未落地，不能假装已经支持。
+- 本地 release APK 已支持；正式签名发布、AAB 与商店分发暂未落地，不能假装已经支持。
 - GitHub Actions 目前只产出 debug APK artifact，不等同于正式 release 包。
 
 ## Repository Workflow

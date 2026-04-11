@@ -20,6 +20,7 @@
 - 单独 Git 仓库
 - 最小 Android app module
 - 本地 `assembleDebug` 构建能力
+- 本地 release APK 打包能力
 - GitHub Actions debug APK artifact
 
 这一步也明确了与核心仓库的边界：
@@ -32,7 +33,7 @@
 
 - Xray core 内嵌与 JNI 封装
 - 真正的透明代理/TUN 控制
-- 签名 release APK / AAB
+- 正式 release AAB 与商店分发链路
 - 扫码订阅、节点池同步、策略路由
 
 ## Quick Start
@@ -58,10 +59,36 @@ cp local.properties.example local.properties
 ./scripts/test-debug-unit.sh
 ```
 
+### Local Release APK
+
+默认可生成本地 unsigned release APK：
+
+```bash
+./scripts/build-release-apk.sh
+```
+
+如果要生成 signed release APK：
+
+```bash
+cp keystore.properties.example keystore.properties
+# 填入你的签名信息
+./scripts/build-release-apk.sh
+```
+
+默认脚本会跳过一部分 release lint report 相关任务，优先保证本地可打包。
+如果你要尽量保留完整 release 任务链路：
+
+```bash
+XRAY_ANDROID_RELEASE_WITH_LINT=1 ./scripts/build-release-apk.sh
+```
+
 ### Output
 
 ```bash
 app/build/outputs/apk/debug/app-debug.apk
+app/build/outputs/apk/release/app-release-unsigned.apk
+# or
+app/build/outputs/apk/release/app-release.apk
 ```
 
 ## GitHub Actions
@@ -89,6 +116,7 @@ app/build/outputs/apk/debug/app-debug.apk
 - 非 trivial 需求优先走 issue 闭环
 - 改动后必须做针对性构建或测试验证
 - 不要把 SDK 路径、签名材料、APK 构建产物提交进仓库
+- `keystore.properties` 与 keystore 文件只保留在本机，不要入库
 
 ## Product Inheritance
 

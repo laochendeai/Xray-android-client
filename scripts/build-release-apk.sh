@@ -27,7 +27,11 @@ if [[ -f "$signed_apk" ]]; then
   echo "Signed release APK: $signed_apk"
 elif [[ -f "$unsigned_apk" ]]; then
   echo "Unsigned release APK: $unsigned_apk"
-  echo "To generate a signed APK, create keystore.properties from keystore.properties.example."
+  if [[ -f "$ROOT_DIR/keystore.properties" ]]; then
+    echo "Release signing is currently disabled. Check keystore.properties and the referenced keystore file."
+  else
+    echo "To generate a signed APK, create keystore.properties from keystore.properties.example."
+  fi
 else
   echo "Release build finished, but no APK was found in app/build/outputs/apk/release." >&2
   exit 1

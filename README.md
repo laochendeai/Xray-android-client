@@ -71,7 +71,7 @@ cp local.properties.example local.properties
 
 ```bash
 cp keystore.properties.example keystore.properties
-# 填入你的签名信息
+# 填入真实签名信息，并确保 storeFile 指向实际存在的 jks / keystore 文件
 ./scripts/build-release-apk.sh
 ```
 

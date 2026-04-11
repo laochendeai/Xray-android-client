@@ -12,13 +12,16 @@
 
 - Product: 独立 Android 客户端
 - Primary users: 需要在手机端导入订阅、查看节点、后续接入代理控制的用户
-- Primary outcome: 先建立独立仓库、最小可运行 Android 工程和 APK 构建链路
-- Current stage: bootstrap
+- Primary outcome: 先建立独立仓库，并落下第一阶段的订阅导入与本地持久化能力
+- Current stage: phase-1 initial implementation
 
 ## Current Scope
 
 - 单独 Git 仓库
 - 最小 Android app module
+- URL / 手工粘贴 / 本地文件三种导入入口
+- 订阅与节点的本地 JSON 持久化
+- 最小可用的导入结果与节点列表展示
 - 本地 `assembleDebug` 构建能力
 - 本地 release APK 打包能力
 - GitHub Actions debug APK artifact
@@ -34,7 +37,19 @@
 - Xray core 内嵌与 JNI 封装
 - 真正的透明代理/TUN 控制
 - 正式 release AAB 与商店分发链路
-- 扫码订阅、节点池同步、策略路由
+- 扫码订阅、五池节点生命周期、目标站点绑定、策略路由
+
+## Supported Import Formats
+
+当前首版已支持解析这些分享 URI：
+
+- `vless://`
+- `vmess://`
+- `trojan://`
+- `ss://`
+- `anytls://`
+
+也支持导入整段 base64 订阅内容，并自动拆成多条节点记录。
 
 ## Quick Start
 
@@ -129,7 +144,7 @@ Android 客户端不会机械复制桌面 WebPanel，但会继承这些核心语
 
 ## Next Milestones
 
-1. 接入订阅导入与本地持久化
+1. 补齐导入编辑、删除和更清晰的导入错误反馈
 2. 落地五池节点模型与移动端节点池 UI
 3. 实现目标站点绑定与命中校验
 4. 决定 Xray core 集成与真实运行态方案

@@ -2,6 +2,12 @@
 
 独立 Android 客户端仓库，用来承接当前 `Xray-core-laochendeai` 之外的移动端开发、打包和后续发布工作。
 
+## Documentation Map
+
+- [Android 迁移背景](docs/MIGRATION_CONTEXT.md)
+- [Android 路线图](docs/ROADMAP.md)
+- [项目规则](CLAUDE.md)
+
 ## Overview
 
 - Product: 独立 Android 客户端
@@ -15,6 +21,12 @@
 - 最小 Android app module
 - 本地 `assembleDebug` 构建能力
 - GitHub Actions debug APK artifact
+
+这一步也明确了与核心仓库的边界：
+
+- 核心仓库当前仍以 runtime 和内嵌 WebPanel 为主
+- 核心仓库的 Android release 目前还是 CLI binary zip，不是 APK
+- 真正的 Android 客户端交付、交互和后续发版改由本仓库承担
 
 暂未实现：
 
@@ -78,9 +90,20 @@ app/build/outputs/apk/debug/app-debug.apk
 - 改动后必须做针对性构建或测试验证
 - 不要把 SDK 路径、签名材料、APK 构建产物提交进仓库
 
+## Product Inheritance
+
+Android 客户端不会机械复制桌面 WebPanel，但会继承这些核心语义：
+
+- 订阅导入支持远程 URL、手工粘贴、本地文件，后续补二维码
+- 节点池保持候选、验证中、活跃、隔离、已移除五池模型
+- 只有活跃池可以进入后续自动选择和运行态候选
+- 节点池是主操作面，诊断页不承担主控制流程
+
 ## Next Milestones
 
-1. 接入订阅导入与节点模型
-2. 设计移动端节点池与目标站点绑定界面
-3. 决定 Xray core 二进制集成方案
-4. 接通 release 签名和正式发版流程
+1. 接入订阅导入与本地持久化
+2. 落地五池节点模型与移动端节点池 UI
+3. 实现目标站点绑定与命中校验
+4. 决定 Xray core 集成与真实运行态方案
+
+详细分阶段规划见 [docs/ROADMAP.md](docs/ROADMAP.md)。

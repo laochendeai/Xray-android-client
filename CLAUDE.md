@@ -26,7 +26,7 @@ This repository uses Codex/Claude as an execution agent, not just a chat assista
 ### Build / Package
 
 ```bash
-./gradlew assembleDebug
+./scripts/build-debug-apk.sh
 ```
 
 ## Architecture Boundaries

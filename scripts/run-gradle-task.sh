@@ -19,14 +19,14 @@ if [[ ! -d "$sdk_dir" ]]; then
 fi
 
 if [[ -z "$gradle_bin" ]]; then
-  if [[ -x "$ROOT_DIR/.gradle-bin/gradle/bin/gradle" ]]; then
+  if [[ -x "$ROOT_DIR/gradlew" ]]; then
+    gradle_bin="$ROOT_DIR/gradlew"
+  elif [[ -x "$ROOT_DIR/.gradle-bin/gradle/bin/gradle" ]]; then
     gradle_bin="$ROOT_DIR/.gradle-bin/gradle/bin/gradle"
   elif [[ -x "/home/leo-cy/.local/gradle-8.14.3/bin/gradle" ]]; then
     gradle_bin="/home/leo-cy/.local/gradle-8.14.3/bin/gradle"
   elif command -v gradle >/dev/null 2>&1; then
     gradle_bin="$(command -v gradle)"
-  else
-    gradle_bin="$ROOT_DIR/gradlew"
   fi
 fi
 

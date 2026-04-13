@@ -71,7 +71,7 @@ tasks.register("prepareBundledXrayCore") {
             abiDir.mkdirs()
             def outputFile = new File(abiDir, "libxray.so")
 
-            exec {
+            project.exec {
                 workingDir xrayCoreRepo
                 environment "CGO_ENABLED", "0"
                 environment "GOOS", "android"

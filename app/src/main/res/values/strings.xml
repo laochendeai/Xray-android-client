@@ -20,6 +20,7 @@
     <string name="status_detail_vpn_running">当前正在通过 %1$s 承载手机流量</string>
     <string name="status_detail_vpn_stopped">手机代理已经停止。重新点选节点后可以再次启动。</string>
     <string name="status_detail_vpn_permission_denied">未授予 VPN 权限，无法启动代理</string>
+    <string name="status_detail_notification_permission_denied">未授予通知权限，前台 VPN 服务无法稳定启动</string>
     <string name="action_import_url">URL 导入</string>
     <string name="action_import_manual">手工粘贴</string>
     <string name="action_import_file">本地文件</string>
@@ -70,6 +71,7 @@
     <string name="toast_node_selected">已选中节点：%1$s</string>
     <string name="toast_vpn_starting">正在启动手机代理：%1$s</string>
     <string name="toast_vpn_stopped">手机代理已停止</string>
+    <string name="toast_notification_permission_required">请先授予通知权限，再启动手机代理</string>
     <string name="notification_channel_name">Xray VPN Runtime</string>
     <string name="notification_title">Xray 手机代理运行中</string>
     <string name="notification_text_starting">正在建立 VPN 和核心进程</string>

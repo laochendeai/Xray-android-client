@@ -33,9 +33,16 @@ import java.io.FileOutputStream;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.io.OutputStreamWriter;
+import java.net.HttpURLConnection;
+import java.net.InetSocketAddress;
+import java.net.Proxy;
+import java.net.URL;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 
 public class XrayVpnService extends VpnService {
     public static final String ACTION_START = "cc.hifly.xrayandroid.runtime.START";
@@ -46,6 +53,14 @@ public class XrayVpnService extends VpnService {
     private static final int NOTIFICATION_ID = 1001;
     private static final int VPN_MTU = 1500;
     private static final String TAG = "XrayVpnService";
+    private static final int PROXY_PROBE_CONNECT_TIMEOUT_MS = 2500;
+    private static final int PROXY_PROBE_READ_TIMEOUT_MS = 2500;
+    private static final int PROXY_PROBE_ATTEMPTS = 3;
+    private static final long PROXY_PROBE_RETRY_DELAY_MS = 500L;
+    private static final String[] PROXY_PROBE_URLS = new String[] {
+            "https://cp.cloudflare.com/generate_204",
+            "https://www.gstatic.com/generate_204"
+    };
 
     private final ExecutorService executor = Executors.newSingleThreadExecutor();
     private Process xrayProcess;
@@ -130,47 +145,47 @@ public class XrayVpnService extends VpnService {
                 node.id,
                 node.displayName,
                 getString(R.string.status_value_vpn_starting),
-                getString(R.string.status_detail_vpn_selected, node.displayName)
+                getString(R.string.status_detail_vpn_preflight, node.displayName)
         );
 
         try {
-            ParcelFileDescriptor tunInterface = buildTunInterface(node.displayName);
-            if (tunInterface == null) {
-                throw new IllegalStateException(getString(R.string.error_runtime_vpn_establish_failed));
-            }
-            tunInterfaceHandle = tunInterface;
-
             File runtimeDir = new File(getFilesDir(), "runtime");
             if (!runtimeDir.exists() && !runtimeDir.mkdirs()) {
                 throw new IllegalStateException("runtime dir create failed");
-            }
-
-            File configFile = new File(runtimeDir, "xray-config.json");
-            try (BufferedWriter writer = new BufferedWriter(
-                    new OutputStreamWriter(new FileOutputStream(configFile, false), StandardCharsets.UTF_8)
-            )) {
-                writer.write(new XrayConfigBuilder().build(node, VPN_MTU));
             }
 
             File executable = resolveBundledCore();
             executable.setReadable(true, false);
             executable.setExecutable(true, false);
 
+            verifyNodeBeforeVpn(node, runtimeDir, executable);
+            currentLogFile = null;
+
+            RuntimePreferences.markStarting(
+                    this,
+                    node.id,
+                    node.displayName,
+                    getString(R.string.status_value_vpn_starting),
+                    getString(R.string.status_detail_vpn_selected, node.displayName)
+            );
+
+            ParcelFileDescriptor tunInterface = buildTunInterface(node.displayName);
+            if (tunInterface == null) {
+                throw new IllegalStateException(getString(R.string.error_runtime_vpn_establish_failed));
+            }
+            tunInterfaceHandle = tunInterface;
+
+            File configFile = new File(runtimeDir, "xray-config.json");
+            writeConfig(configFile, new XrayConfigBuilder().build(node, VPN_MTU));
+
             File logFile = new File(runtimeDir, "xray-runtime.log");
             currentLogFile = logFile;
-            ProcessBuilder processBuilder = new ProcessBuilder(
-                    executable.getAbsolutePath(),
-                    "run",
-                    "-c",
-                    configFile.getAbsolutePath()
-            );
-            processBuilder.directory(runtimeDir);
-            processBuilder.redirectErrorStream(true);
-            processBuilder.environment().put("XRAY_TUN_FD", "0");
-
-            xrayProcess = startProcessWithTunOnStdin(processBuilder, tunInterface);
+            xrayProcess = startRuntimeProcess(executable, runtimeDir, configFile, tunInterface);
             pumpLog(xrayProcess.getInputStream(), logFile);
-            monitorProcess(xrayProcess);
+            verifyProxyEgress();
+            if (!xrayProcess.isAlive()) {
+                throw new IllegalStateException(getString(R.string.error_runtime_probe_process_died));
+            }
 
             RuntimePreferences.markRunning(
                     this,
@@ -183,12 +198,15 @@ public class XrayVpnService extends VpnService {
                     NOTIFICATION_ID,
                     buildNotification(getString(R.string.notification_text_running, node.displayName))
             );
+            monitorProcess(xrayProcess);
         } catch (Exception exception) {
+            String failureDetail = getString(R.string.error_runtime_start_failed)
+                    + ": " + enrichRuntimeFailureDetail(exception.getMessage());
             stopRuntimeInternal();
             RuntimePreferences.markStopped(
                     this,
                     getString(R.string.status_value_vpn_failed),
-                    getString(R.string.error_runtime_start_failed) + ": " + enrichRuntimeFailureDetail(exception.getMessage())
+                    failureDetail
             );
             stopForeground(STOP_FOREGROUND_REMOVE);
             stopSelf();
@@ -225,11 +243,13 @@ public class XrayVpnService extends VpnService {
             try {
                 int exitCode = process.waitFor();
                 if (!stopping && process == xrayProcess) {
+                    String failureDetail = getString(R.string.error_runtime_start_failed)
+                            + ": " + buildExitDetail(exitCode);
                     stopRuntimeInternal();
                     RuntimePreferences.markStopped(
                             XrayVpnService.this,
                             getString(R.string.status_value_vpn_failed),
-                            getString(R.string.error_runtime_start_failed) + ": " + buildExitDetail(exitCode)
+                            failureDetail
                     );
                     stopForeground(STOP_FOREGROUND_REMOVE);
                     stopSelf();
@@ -294,12 +314,61 @@ public class XrayVpnService extends VpnService {
         return builder.establish();
     }
 
+    private void verifyNodeBeforeVpn(NodeRecord node, File runtimeDir, File executable) throws Exception {
+        File configFile = new File(runtimeDir, "xray-preflight-config.json");
+        writeConfig(configFile, new XrayConfigBuilder().buildPreflight(node));
+
+        File logFile = new File(runtimeDir, "xray-preflight.log");
+        currentLogFile = logFile;
+
+        Process preflightProcess = null;
+        try {
+            preflightProcess = startRuntimeProcess(executable, runtimeDir, configFile, null);
+            pumpLog(preflightProcess.getInputStream(), logFile);
+            verifyProxyEgress();
+            if (!preflightProcess.isAlive()) {
+                throw new IllegalStateException(getString(R.string.error_runtime_probe_process_died));
+            }
+        } finally {
+            stopProcess(preflightProcess);
+        }
+    }
+
     private File resolveBundledCore() {
         File nativeLib = new File(getApplicationInfo().nativeLibraryDir, "libxray.so");
         if (nativeLib.isFile()) {
             return nativeLib;
         }
         throw new IllegalStateException(getString(R.string.error_runtime_unsupported_abi));
+    }
+
+    private void writeConfig(File configFile, String content) throws Exception {
+        try (BufferedWriter writer = new BufferedWriter(
+                new OutputStreamWriter(new FileOutputStream(configFile, false), StandardCharsets.UTF_8)
+        )) {
+            writer.write(content);
+        }
+    }
+
+    private Process startRuntimeProcess(
+            File executable,
+            File runtimeDir,
+            File configFile,
+            @Nullable ParcelFileDescriptor tunInterface
+    ) throws Exception {
+        ProcessBuilder processBuilder = new ProcessBuilder(
+                executable.getAbsolutePath(),
+                "run",
+                "-c",
+                configFile.getAbsolutePath()
+        );
+        processBuilder.directory(runtimeDir);
+        processBuilder.redirectErrorStream(true);
+        if (tunInterface == null) {
+            return processBuilder.start();
+        }
+        processBuilder.environment().put("XRAY_TUN_FD", "0");
+        return startProcessWithTunOnStdin(processBuilder, tunInterface);
     }
 
     private Process startProcessWithTunOnStdin(ProcessBuilder processBuilder, ParcelFileDescriptor tunInterface) throws Exception {
@@ -313,6 +382,99 @@ public class XrayVpnService extends VpnService {
             } finally {
                 Os.close(stdinBackup);
             }
+        }
+    }
+
+    private void verifyProxyEgress() throws Exception {
+        List<String> failures = new ArrayList<>();
+        for (int attempt = 0; attempt < PROXY_PROBE_ATTEMPTS; attempt++) {
+            for (String urlValue : PROXY_PROBE_URLS) {
+                try {
+                    probeUrlThroughLocalProxy(urlValue);
+                    return;
+                } catch (Exception exception) {
+                    failures.add(compactProbeFailure(urlValue, exception));
+                }
+            }
+            if (attempt < PROXY_PROBE_ATTEMPTS - 1) {
+                try {
+                    Thread.sleep(PROXY_PROBE_RETRY_DELAY_MS);
+                } catch (InterruptedException interruptedException) {
+                    Thread.currentThread().interrupt();
+                    throw new IllegalStateException(getString(R.string.error_runtime_probe_failed));
+                }
+            }
+        }
+        throw new IllegalStateException(
+                getString(R.string.error_runtime_probe_failed) + ": " + summarizeProbeFailures(failures)
+        );
+    }
+
+    private void probeUrlThroughLocalProxy(String urlValue) throws Exception {
+        Proxy proxy = new Proxy(
+                Proxy.Type.HTTP,
+                new InetSocketAddress("127.0.0.1", XrayConfigBuilder.PROBE_HTTP_INBOUND_PORT)
+        );
+        HttpURLConnection connection = (HttpURLConnection) new URL(urlValue).openConnection(proxy);
+        connection.setConnectTimeout(PROXY_PROBE_CONNECT_TIMEOUT_MS);
+        connection.setReadTimeout(PROXY_PROBE_READ_TIMEOUT_MS);
+        connection.setInstanceFollowRedirects(false);
+        connection.setUseCaches(false);
+        connection.setRequestProperty("User-Agent", "XrayAndroidClient/2026.04");
+        try {
+            int statusCode = connection.getResponseCode();
+            if (statusCode >= 200 && statusCode < 400) {
+                return;
+            }
+            throw new IllegalStateException(new URL(urlValue).getHost() + " -> HTTP " + statusCode);
+        } finally {
+            connection.disconnect();
+        }
+    }
+
+    private String compactProbeFailure(String urlValue, Exception exception) {
+        try {
+            return new URL(urlValue).getHost() + " -> " + safeExceptionMessage(exception);
+        } catch (Exception ignored) {
+            return safeExceptionMessage(exception);
+        }
+    }
+
+    private String summarizeProbeFailures(List<String> failures) {
+        if (failures.isEmpty()) {
+            return getString(R.string.error_runtime_probe_failed);
+        }
+        StringBuilder builder = new StringBuilder();
+        int startIndex = Math.max(0, failures.size() - 3);
+        for (int index = startIndex; index < failures.size(); index++) {
+            if (builder.length() > 0) {
+                builder.append(" | ");
+            }
+            builder.append(failures.get(index));
+        }
+        return builder.toString();
+    }
+
+    private String safeExceptionMessage(Exception exception) {
+        if (exception == null || exception.getMessage() == null || exception.getMessage().trim().isEmpty()) {
+            return exception == null ? "unknown error" : exception.getClass().getSimpleName();
+        }
+        return exception.getMessage().trim();
+    }
+
+    private void stopProcess(@Nullable Process process) {
+        if (process == null) {
+            return;
+        }
+        process.destroy();
+        try {
+            if (!process.waitFor(1, TimeUnit.SECONDS)) {
+                process.destroyForcibly();
+                process.waitFor(1, TimeUnit.SECONDS);
+            }
+        } catch (InterruptedException interruptedException) {
+            Thread.currentThread().interrupt();
+            process.destroyForcibly();
         }
     }
 

@@ -8,6 +8,7 @@ import org.junit.Test;
 import cc.hifly.xrayandroid.model.NodeRecord;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
 public class XrayConfigBuilderTest {
@@ -21,9 +22,11 @@ public class XrayConfigBuilderTest {
         String config = new XrayConfigBuilder().build(node, 1500);
         JsonObject json = GSON.fromJson(config, JsonObject.class);
         JsonObject inbound = json.getAsJsonArray("inbounds").get(0).getAsJsonObject();
+        JsonObject probeInbound = json.getAsJsonArray("inbounds").get(1).getAsJsonObject();
         JsonObject outbound = json.getAsJsonArray("outbounds").get(0).getAsJsonObject();
 
         assertEquals("tun", inbound.get("protocol").getAsString());
+        assertEquals("http", probeInbound.get("protocol").getAsString());
         assertEquals("vless", outbound.get("protocol").getAsString());
         assertEquals("ws", outbound.getAsJsonObject("streamSettings").get("network").getAsString());
         assertEquals("tls", outbound.getAsJsonObject("streamSettings").get("security").getAsString());
@@ -61,5 +64,18 @@ public class XrayConfigBuilderTest {
         assertEquals("shadowsocks", outbound.get("protocol").getAsString());
         assertEquals("ws", outbound.getAsJsonObject("streamSettings").get("network").getAsString());
         assertEquals("tls", outbound.getAsJsonObject("streamSettings").get("security").getAsString());
+    }
+
+    @Test
+    public void buildsPreflightConfigWithoutTunInbound() {
+        NodeRecord node = new NodeRecord();
+        node.rawUri = "vless://6202b230-417c-4d8e-b624-0f71afa9c75d@185.243.112.61:2053?type=ws&security=tls&host=edge.example.com&path=%2Fproxy&sni=edge.example.com#demo";
+
+        String config = new XrayConfigBuilder().buildPreflight(node);
+        JsonObject json = GSON.fromJson(config, JsonObject.class);
+        JsonObject inbound = json.getAsJsonArray("inbounds").get(0).getAsJsonObject();
+
+        assertEquals("http", inbound.get("protocol").getAsString());
+        assertFalse(config.contains("\"protocol\": \"tun\""));
     }
 }

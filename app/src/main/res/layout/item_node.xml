@@ -38,6 +38,14 @@
             android:layout_marginTop="10dp"
             android:textAppearance="@style/TextAppearance.MaterialComponents.Caption"
             android:textColor="@color/brand_muted" />
+
+        <TextView
+            android:id="@+id/nodeSelectionText"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:textAppearance="@style/TextAppearance.MaterialComponents.Caption"
+            android:textColor="@color/brand_primary" />
     </LinearLayout>
 
 </com.google.android.material.card.MaterialCardView>

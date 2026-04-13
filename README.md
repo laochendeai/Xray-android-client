@@ -12,8 +12,8 @@
 
 - Product: 独立 Android 客户端
 - Primary users: 需要在手机端导入订阅、查看节点、后续接入代理控制的用户
-- Primary outcome: 先建立独立仓库，并落下第一阶段的订阅导入与本地持久化能力
-- Current stage: phase-1 initial implementation
+- Primary outcome: 在 Android 端完成“导入节点 -> 选择节点 -> 启动 VPN -> 实际承载流量”的最小闭环
+- Current stage: phase-4/5 first runnable slice
 
 ## Current Scope
 
@@ -21,7 +21,10 @@
 - 最小 Android app module
 - URL / 手工粘贴 / 本地文件三种导入入口
 - 订阅与节点的本地 JSON 持久化
-- 最小可用的导入结果与节点列表展示
+- 节点点选与当前运行节点状态展示
+- Android `VpnService` + 前台服务
+- 内置 Android Xray core 二进制打包
+- 从导入节点生成可运行 Xray TUN 配置
 - 本地 `assembleDebug` 构建能力
 - 本地 release APK 打包能力
 - GitHub Actions debug APK artifact
@@ -34,10 +37,10 @@
 
 暂未实现：
 
-- Xray core 内嵌与 JNI 封装
-- 真正的透明代理/TUN 控制
-- 正式 release AAB 与商店分发链路
-- 扫码订阅、五池节点生命周期、目标站点绑定、策略路由
+- 五池节点生命周期
+- 目标站点绑定与策略路由 UI
+- 扫码订阅 / 导出 / 二维码
+- 正式 AAB 与商店分发链路
 
 ## Supported Import Formats
 
@@ -76,7 +79,7 @@ cp local.properties.example local.properties
 
 ### Local Release APK
 
-默认可生成本地 unsigned release APK：
+默认可生成本地 signed release APK：
 
 ```bash
 ./scripts/build-release-apk.sh
@@ -88,6 +91,13 @@ cp local.properties.example local.properties
 cp keystore.properties.example keystore.properties
 # 填入真实签名信息，并确保 storeFile 指向实际存在的 jks / keystore 文件
 ./scripts/build-release-apk.sh
+```
+
+构建时会自动从本机 `Xray-core-laochendeai` 仓库编译 Android `arm64-v8a` 核心并打进 APK。
+如果核心仓库不在默认相邻目录，可以通过环境变量指定：
+
+```bash
+XRAY_CORE_REPO=/path/to/Xray-core-laochendeai ./scripts/build-release-apk.sh
 ```
 
 默认脚本会跳过一部分 release lint report 相关任务，优先保证本地可打包。
@@ -139,7 +149,7 @@ Android 客户端不会机械复制桌面 WebPanel，但会继承这些核心语
 
 - 订阅导入支持远程 URL、手工粘贴、本地文件，后续补二维码
 - 节点池保持候选、验证中、活跃、隔离、已移除五池模型
-- 只有活跃池可以进入后续自动选择和运行态候选
+- 运行态要以真实代理流量为准，不能停留在“只展示订阅”
 - 节点池是主操作面，诊断页不承担主控制流程
 
 ## Next Milestones

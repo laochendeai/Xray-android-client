@@ -1,9 +1,10 @@
 package cc.hifly.xrayandroid;
 
-import android.content.Context;
+import android.content.Intent;
 import android.database.Cursor;
-import android.os.Bundle;
 import android.net.Uri;
+import android.net.VpnService;
+import android.os.Bundle;
 import android.provider.OpenableColumns;
 import android.text.InputType;
 import android.view.LayoutInflater;
@@ -14,19 +15,13 @@ import android.widget.LinearLayout;
 import android.widget.TextView;
 import android.widget.Toast;
 
+import androidx.activity.result.ActivityResult;
 import androidx.activity.result.ActivityResultLauncher;
 import androidx.activity.result.contract.ActivityResultContracts;
-import androidx.appcompat.app.AppCompatActivity;
 import androidx.appcompat.app.AlertDialog;
+import androidx.appcompat.app.AppCompatActivity;
 
-import cc.hifly.xrayandroid.data.AppStateStore;
-import cc.hifly.xrayandroid.data.ImportCoordinator;
-import cc.hifly.xrayandroid.data.ImportResult;
-import cc.hifly.xrayandroid.model.AppState;
-import cc.hifly.xrayandroid.model.NodeRecord;
-import cc.hifly.xrayandroid.model.SubscriptionRecord;
-import cc.hifly.xrayandroid.model.SubscriptionSourceType;
-import cc.hifly.xrayandroid.parser.NodeUriParser;
+import com.google.android.material.card.MaterialCardView;
 
 import java.io.BufferedReader;
 import java.io.File;
@@ -45,6 +40,17 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.function.Consumer;
 
+import cc.hifly.xrayandroid.data.AppStateStore;
+import cc.hifly.xrayandroid.data.ImportCoordinator;
+import cc.hifly.xrayandroid.data.ImportResult;
+import cc.hifly.xrayandroid.model.AppState;
+import cc.hifly.xrayandroid.model.NodeRecord;
+import cc.hifly.xrayandroid.model.SubscriptionRecord;
+import cc.hifly.xrayandroid.model.SubscriptionSourceType;
+import cc.hifly.xrayandroid.parser.NodeUriParser;
+import cc.hifly.xrayandroid.runtime.RuntimePreferences;
+import cc.hifly.xrayandroid.runtime.XrayVpnService;
+
 public class MainActivity extends AppCompatActivity {
     private final ExecutorService ioExecutor = Executors.newSingleThreadExecutor();
 
@@ -52,11 +58,16 @@ public class MainActivity extends AppCompatActivity {
     private TextView statusDetailText;
     private TextView subscriptionsSummaryText;
     private TextView nodesSummaryText;
+    private TextView selectedNodeText;
+    private TextView runtimeHintText;
     private LinearLayout subscriptionListContainer;
     private LinearLayout nodeListContainer;
 
     private ImportCoordinator importCoordinator;
     private ActivityResultLauncher<String> filePickerLauncher;
+    private ActivityResultLauncher<Intent> vpnPermissionLauncher;
+    private RuntimePreferences.Snapshot runtimeSnapshot;
+    private List<NodeRecord> currentNodes = new ArrayList<>();
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -72,6 +83,8 @@ public class MainActivity extends AppCompatActivity {
         statusDetailText = findViewById(R.id.statusDetailText);
         subscriptionsSummaryText = findViewById(R.id.subscriptionsSummaryText);
         nodesSummaryText = findViewById(R.id.nodesSummaryText);
+        selectedNodeText = findViewById(R.id.selectedNodeText);
+        runtimeHintText = findViewById(R.id.runtimeHintText);
         subscriptionListContainer = findViewById(R.id.subscriptionListContainer);
         nodeListContainer = findViewById(R.id.nodeListContainer);
 
@@ -79,13 +92,21 @@ public class MainActivity extends AppCompatActivity {
                 new ActivityResultContracts.GetContent(),
                 this::handleFileSelected
         );
+        vpnPermissionLauncher = registerForActivityResult(
+                new ActivityResultContracts.StartActivityForResult(),
+                this::handleVpnPermissionResult
+        );
 
         bindActionButtons();
-        setStatus(
-                getString(R.string.status_value_ready),
-                getString(R.string.status_detail_initial)
-        );
+        runtimeSnapshot = RuntimePreferences.load(this);
+        applyRuntimeStatus();
         refreshState();
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        refreshRuntimeStatus();
     }
 
     @Override
@@ -98,6 +119,17 @@ public class MainActivity extends AppCompatActivity {
         wireButton(R.id.buttonImport, view -> showUrlImportDialog());
         wireButton(R.id.buttonPool, view -> showManualImportDialog());
         wireButton(R.id.buttonGateway, view -> filePickerLauncher.launch("*/*"));
+        wireButton(R.id.buttonStartVpn, view -> requestVpnStart());
+        wireButton(R.id.buttonStopVpn, view -> {
+            XrayVpnService.stop(this);
+            RuntimePreferences.markStopped(
+                    this,
+                    getString(R.string.status_value_vpn_stopped),
+                    getString(R.string.status_detail_vpn_stopped)
+            );
+            refreshRuntimeStatus();
+            Toast.makeText(this, R.string.toast_vpn_stopped, Toast.LENGTH_SHORT).show();
+        });
     }
 
     private void wireButton(int buttonId, View.OnClickListener listener) {
@@ -248,6 +280,7 @@ public class MainActivity extends AppCompatActivity {
 
         List<NodeRecord> nodes = new ArrayList<>(state.nodes);
         nodes.sort(Comparator.comparingLong(node -> -node.lastImportedAt));
+        currentNodes = nodes;
 
         subscriptionsSummaryText.setText(
                 getString(R.string.summary_subscriptions, subscriptions.size())
@@ -256,6 +289,7 @@ public class MainActivity extends AppCompatActivity {
 
         renderSubscriptions(subscriptions);
         renderNodes(nodes);
+        refreshRuntimeStatus();
     }
 
     private void renderSubscriptions(List<SubscriptionRecord> subscriptions) {
@@ -297,9 +331,11 @@ public class MainActivity extends AppCompatActivity {
         LayoutInflater inflater = LayoutInflater.from(this);
         for (NodeRecord node : nodes) {
             View itemView = inflater.inflate(R.layout.item_node, nodeListContainer, false);
+            MaterialCardView card = (MaterialCardView) itemView;
             TextView title = itemView.findViewById(R.id.nodeTitleText);
             TextView subtitle = itemView.findViewById(R.id.nodeSubtitleText);
             TextView meta = itemView.findViewById(R.id.nodeMetaText);
+            TextView selection = itemView.findViewById(R.id.nodeSelectionText);
 
             title.setText(node.displayName);
             subtitle.setText(getString(
@@ -314,6 +350,35 @@ public class MainActivity extends AppCompatActivity {
                     safeValue(node.transport),
                     safeValue(node.security)
             ));
+
+            boolean selected = node.id != null && node.id.equals(runtimeSnapshot.selectedNodeId);
+            boolean running = runtimeSnapshot.running && node.id != null && node.id.equals(runtimeSnapshot.runningNodeId);
+            if (running) {
+                selection.setText(R.string.node_selection_running);
+                card.setStrokeWidth(dp(2));
+                card.setStrokeColor(getColor(R.color.brand_primary));
+            } else if (selected) {
+                selection.setText(R.string.node_selection_selected);
+                card.setStrokeWidth(dp(2));
+                card.setStrokeColor(getColor(R.color.brand_primary));
+            } else {
+                selection.setText(R.string.node_selection_tap_to_select);
+                card.setStrokeWidth(dp(1));
+                card.setStrokeColor(getColor(R.color.card_stroke));
+            }
+
+            itemView.setOnClickListener(view -> {
+                RuntimePreferences.saveSelectedNodeId(this, node.id);
+                runtimeSnapshot = RuntimePreferences.load(this);
+                applyRuntimeStatus();
+                renderNodes(currentNodes);
+                Toast.makeText(
+                        this,
+                        getString(R.string.toast_node_selected, node.displayName),
+                        Toast.LENGTH_SHORT
+                ).show();
+            });
+
             nodeListContainer.addView(itemView);
         }
     }
@@ -351,6 +416,107 @@ public class MainActivity extends AppCompatActivity {
             editText.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_MULTI_LINE);
         }
         return editText;
+    }
+
+    private void requestVpnStart() {
+        NodeRecord selectedNode = findSelectedNode();
+        if (selectedNode == null) {
+            Toast.makeText(this, R.string.error_select_node_first, Toast.LENGTH_LONG).show();
+            return;
+        }
+
+        Intent prepareIntent = VpnService.prepare(this);
+        if (prepareIntent != null) {
+            vpnPermissionLauncher.launch(prepareIntent);
+            return;
+        }
+        startVpnWithSelectedNode(selectedNode);
+    }
+
+    private void handleVpnPermissionResult(ActivityResult result) {
+        if (result.getResultCode() != RESULT_OK) {
+            RuntimePreferences.markStopped(
+                    this,
+                    getString(R.string.status_value_vpn_failed),
+                    getString(R.string.status_detail_vpn_permission_denied)
+            );
+            refreshRuntimeStatus();
+            return;
+        }
+
+        NodeRecord selectedNode = findSelectedNode();
+        if (selectedNode == null) {
+            Toast.makeText(this, R.string.error_select_node_first, Toast.LENGTH_LONG).show();
+            return;
+        }
+        startVpnWithSelectedNode(selectedNode);
+    }
+
+    private void startVpnWithSelectedNode(NodeRecord node) {
+        RuntimePreferences.markStarting(
+                this,
+                node.id,
+                node.displayName,
+                getString(R.string.status_value_vpn_starting),
+                getString(R.string.status_detail_vpn_selected, node.displayName)
+        );
+        refreshRuntimeStatus();
+        XrayVpnService.start(this, node.id);
+        Toast.makeText(
+                this,
+                getString(R.string.toast_vpn_starting, node.displayName),
+                Toast.LENGTH_SHORT
+        ).show();
+    }
+
+    private void refreshRuntimeStatus() {
+        runtimeSnapshot = RuntimePreferences.load(this);
+        applyRuntimeStatus();
+    }
+
+    private void applyRuntimeStatus() {
+        NodeRecord selectedNode = findSelectedNode();
+        if (selectedNode == null) {
+            selectedNodeText.setText(R.string.runtime_selected_node_empty);
+        } else {
+            selectedNodeText.setText(getString(R.string.runtime_selected_node_value, selectedNode.displayName));
+        }
+
+        if (runtimeSnapshot.statusTitle != null && !runtimeSnapshot.statusTitle.trim().isEmpty()) {
+            setStatus(runtimeSnapshot.statusTitle, safeValue(runtimeSnapshot.statusDetail));
+        } else if (selectedNode != null) {
+            setStatus(
+                    getString(R.string.status_value_ready),
+                    getString(R.string.status_detail_vpn_selected, selectedNode.displayName)
+            );
+        } else {
+            setStatus(
+                    getString(R.string.status_value_ready),
+                    getString(R.string.status_detail_initial)
+            );
+        }
+
+        Button startButton = findViewById(R.id.buttonStartVpn);
+        Button stopButton = findViewById(R.id.buttonStopVpn);
+        startButton.setEnabled(selectedNode != null && !runtimeSnapshot.running);
+        stopButton.setEnabled(runtimeSnapshot.running);
+        runtimeHintText.setText(
+                runtimeSnapshot.running
+                        ? getString(R.string.status_detail_vpn_running, safeValue(runtimeSnapshot.runningNodeName))
+                        : getString(R.string.runtime_hint)
+        );
+    }
+
+    private NodeRecord findSelectedNode() {
+        if (runtimeSnapshot == null || runtimeSnapshot.selectedNodeId == null) {
+            return null;
+        }
+        for (NodeRecord node : currentNodes) {
+            if (node.id != null && node.id.equals(runtimeSnapshot.selectedNodeId)) {
+                return node;
+            }
+        }
+        return null;
     }
 
     private String fetchRemoteContent(String urlValue) throws Exception {

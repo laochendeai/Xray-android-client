@@ -17,6 +17,7 @@
     <string name="status_detail_reading_file">正在读取文件 %1$s</string>
     <string name="status_detail_import_summary">%1$s · 新增 %2$d · 更新 %3$d · 跳过 %4$d</string>
     <string name="status_detail_vpn_selected">已选节点：%1$s</string>
+    <string name="status_detail_vpn_preflight">正在校验 %1$s 是否真的可以承载手机出站流量</string>
     <string name="status_detail_vpn_running">当前正在通过 %1$s 承载手机流量</string>
     <string name="status_detail_vpn_stopped">手机代理已经停止。重新点选节点后可以再次启动。</string>
     <string name="status_detail_vpn_permission_denied">未授予 VPN 权限，无法启动代理</string>
@@ -63,6 +64,8 @@
     <string name="error_http_status">HTTP %1$d</string>
     <string name="error_select_node_first">请先点选一个节点</string>
     <string name="error_runtime_start_failed">启动运行时失败</string>
+    <string name="error_runtime_probe_failed">所选节点未通过出站探测</string>
+    <string name="error_runtime_probe_process_died">运行时在可用性校验阶段提前退出</string>
     <string name="error_runtime_core_missing">内置 Xray core 缺失，无法启动</string>
     <string name="error_runtime_unsupported_abi">当前设备架构暂不支持这个 APK 内置核心</string>
     <string name="error_runtime_node_missing">选中的节点已经不存在，请重新选择</string>

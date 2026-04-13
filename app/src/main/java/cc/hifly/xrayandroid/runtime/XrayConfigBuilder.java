@@ -17,8 +17,19 @@ import java.util.Map;
 
 public class XrayConfigBuilder {
     private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
+    static final String PROBE_HTTP_INBOUND_TAG = "probe-http-in";
+    static final int PROBE_HTTP_INBOUND_PORT = 10809;
+    private static final String TUN_INBOUND_TAG = "tun-in";
 
     public String build(NodeRecord node, int mtu) {
+        return build(node, mtu, true);
+    }
+
+    public String buildPreflight(NodeRecord node) {
+        return build(node, 0, false);
+    }
+
+    private String build(NodeRecord node, int mtu, boolean includeTun) {
         ShareLinkRequest request = parseShareLink(node.rawUri);
 
         Map<String, Object> config = new LinkedHashMap<>();
@@ -27,18 +38,27 @@ public class XrayConfigBuilder {
                 "servers", List.of("1.1.1.1", "8.8.8.8", "9.9.9.9"),
                 "queryStrategy", "UseIP"
         ));
-        config.put("inbounds", List.of(
-                mapOf(
-                        "tag", "tun-in",
-                        "port", 0,
-                        "protocol", "tun",
-                        "settings", mapOf("name", "xray0", "MTU", mtu),
-                        "sniffing", mapOf(
-                                "enabled", true,
-                                "destOverride", List.of("http", "tls", "quic")
-                        )
-                )
+        List<Object> inbounds = new ArrayList<>();
+        if (includeTun) {
+            inbounds.add(mapOf(
+                    "tag", TUN_INBOUND_TAG,
+                    "port", 0,
+                    "protocol", "tun",
+                    "settings", mapOf("name", "xray0", "MTU", mtu),
+                    "sniffing", mapOf(
+                            "enabled", true,
+                            "destOverride", List.of("http", "tls", "quic")
+                    )
+            ));
+        }
+        inbounds.add(mapOf(
+                "tag", PROBE_HTTP_INBOUND_TAG,
+                "listen", "127.0.0.1",
+                "port", PROBE_HTTP_INBOUND_PORT,
+                "protocol", "http",
+                "settings", new LinkedHashMap<>()
         ));
+        config.put("inbounds", inbounds);
 
         List<Object> outbounds = new ArrayList<>();
         outbounds.add(buildOutbound(request));
@@ -48,12 +68,14 @@ public class XrayConfigBuilder {
         config.put("outbounds", outbounds);
 
         List<Object> rules = new ArrayList<>();
-        rules.add(mapOf(
-                "type", "field",
-                "inboundTag", List.of("tun-in"),
-                "port", "53",
-                "outboundTag", "dns-out"
-        ));
+        if (includeTun) {
+            rules.add(mapOf(
+                    "type", "field",
+                    "inboundTag", List.of(TUN_INBOUND_TAG),
+                    "port", "53",
+                    "outboundTag", "dns-out"
+            ));
+        }
         rules.add(mapOf(
                 "type", "field",
                 "domain", List.of("full:localhost", "domain:local"),

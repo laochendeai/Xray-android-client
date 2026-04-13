@@ -25,6 +25,7 @@
 - Android `VpnService` + 前台服务
 - 内置 Android Xray core 二进制打包
 - 从导入节点生成可运行 Xray TUN 配置
+- 启动前先做单节点出站预检，避免失效节点把整机流量拉进黑洞
 - 本地 `assembleDebug` 构建能力
 - 本地 release APK 打包能力
 - GitHub Actions debug APK artifact

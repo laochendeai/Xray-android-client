@@ -1,9 +1,12 @@
 package cc.hifly.xrayandroid;
 
+import android.Manifest;
 import android.content.Intent;
+import android.content.pm.PackageManager;
 import android.database.Cursor;
 import android.net.Uri;
 import android.net.VpnService;
+import android.os.Build;
 import android.os.Bundle;
 import android.provider.OpenableColumns;
 import android.text.InputType;
@@ -20,6 +23,7 @@ import androidx.activity.result.ActivityResultLauncher;
 import androidx.activity.result.contract.ActivityResultContracts;
 import androidx.appcompat.app.AlertDialog;
 import androidx.appcompat.app.AppCompatActivity;
+import androidx.core.content.ContextCompat;
 
 import com.google.android.material.card.MaterialCardView;
 
@@ -66,8 +70,10 @@ public class MainActivity extends AppCompatActivity {
     private ImportCoordinator importCoordinator;
     private ActivityResultLauncher<String> filePickerLauncher;
     private ActivityResultLauncher<Intent> vpnPermissionLauncher;
+    private ActivityResultLauncher<String> notificationPermissionLauncher;
     private RuntimePreferences.Snapshot runtimeSnapshot;
     private List<NodeRecord> currentNodes = new ArrayList<>();
+    private boolean pendingVpnStartAfterNotificationPermission;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -95,6 +101,10 @@ public class MainActivity extends AppCompatActivity {
         vpnPermissionLauncher = registerForActivityResult(
                 new ActivityResultContracts.StartActivityForResult(),
                 this::handleVpnPermissionResult
+        );
+        notificationPermissionLauncher = registerForActivityResult(
+                new ActivityResultContracts.RequestPermission(),
+                this::handleNotificationPermissionResult
         );
 
         bindActionButtons();
@@ -425,12 +435,38 @@ public class MainActivity extends AppCompatActivity {
             return;
         }
 
+        if (requiresNotificationPermission() && !hasNotificationPermission()) {
+            pendingVpnStartAfterNotificationPermission = true;
+            notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS);
+            return;
+        }
+
         Intent prepareIntent = VpnService.prepare(this);
         if (prepareIntent != null) {
             vpnPermissionLauncher.launch(prepareIntent);
             return;
         }
         startVpnWithSelectedNode(selectedNode);
+    }
+
+    private void handleNotificationPermissionResult(Boolean granted) {
+        if (!pendingVpnStartAfterNotificationPermission) {
+            return;
+        }
+        pendingVpnStartAfterNotificationPermission = false;
+
+        if (Boolean.TRUE.equals(granted)) {
+            requestVpnStart();
+            return;
+        }
+
+        RuntimePreferences.markStopped(
+                this,
+                getString(R.string.status_value_vpn_failed),
+                getString(R.string.status_detail_notification_permission_denied)
+        );
+        refreshRuntimeStatus();
+        Toast.makeText(this, R.string.toast_notification_permission_required, Toast.LENGTH_LONG).show();
     }
 
     private void handleVpnPermissionResult(ActivityResult result) {
@@ -517,6 +553,15 @@ public class MainActivity extends AppCompatActivity {
             }
         }
         return null;
+    }
+
+    private boolean requiresNotificationPermission() {
+        return Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU;
+    }
+
+    private boolean hasNotificationPermission() {
+        return ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS)
+                == PackageManager.PERMISSION_GRANTED;
     }
 
     private String fetchRemoteContent(String urlValue) throws Exception {

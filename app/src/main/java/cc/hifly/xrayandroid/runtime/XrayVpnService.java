@@ -10,6 +10,9 @@ import android.content.Intent;
 import android.net.VpnService;
 import android.os.Build;
 import android.os.ParcelFileDescriptor;
+import android.system.Os;
+import android.system.OsConstants;
+import android.util.Log;
 
 import androidx.annotation.Nullable;
 import androidx.core.app.NotificationCompat;
@@ -21,8 +24,11 @@ import cc.hifly.xrayandroid.data.AppStateStore;
 import cc.hifly.xrayandroid.model.AppState;
 import cc.hifly.xrayandroid.model.NodeRecord;
 
+import java.io.BufferedReader;
 import java.io.BufferedWriter;
 import java.io.File;
+import java.io.FileDescriptor;
+import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.InputStream;
 import java.io.InputStreamReader;
@@ -39,11 +45,13 @@ public class XrayVpnService extends VpnService {
     private static final String NOTIFICATION_CHANNEL_ID = "xray_runtime";
     private static final int NOTIFICATION_ID = 1001;
     private static final int VPN_MTU = 1500;
+    private static final String TAG = "XrayVpnService";
 
     private final ExecutorService executor = Executors.newSingleThreadExecutor();
     private Process xrayProcess;
-    private int tunFd = -1;
+    private ParcelFileDescriptor tunInterfaceHandle;
     private volatile boolean stopping;
+    private File currentLogFile;
 
     public static void start(Context context, String nodeId) {
         Intent intent = new Intent(context, XrayVpnService.class);
@@ -130,7 +138,7 @@ public class XrayVpnService extends VpnService {
             if (tunInterface == null) {
                 throw new IllegalStateException(getString(R.string.error_runtime_vpn_establish_failed));
             }
-            tunFd = tunInterface.detachFd();
+            tunInterfaceHandle = tunInterface;
 
             File runtimeDir = new File(getFilesDir(), "runtime");
             if (!runtimeDir.exists() && !runtimeDir.mkdirs()) {
@@ -149,6 +157,7 @@ public class XrayVpnService extends VpnService {
             executable.setExecutable(true, false);
 
             File logFile = new File(runtimeDir, "xray-runtime.log");
+            currentLogFile = logFile;
             ProcessBuilder processBuilder = new ProcessBuilder(
                     executable.getAbsolutePath(),
                     "run",
@@ -157,9 +166,9 @@ public class XrayVpnService extends VpnService {
             );
             processBuilder.directory(runtimeDir);
             processBuilder.redirectErrorStream(true);
-            processBuilder.environment().put("XRAY_TUN_FD", String.valueOf(tunFd));
+            processBuilder.environment().put("XRAY_TUN_FD", "0");
 
-            xrayProcess = processBuilder.start();
+            xrayProcess = startProcessWithTunOnStdin(processBuilder, tunInterface);
             pumpLog(xrayProcess.getInputStream(), logFile);
             monitorProcess(xrayProcess);
 
@@ -179,7 +188,7 @@ public class XrayVpnService extends VpnService {
             RuntimePreferences.markStopped(
                     this,
                     getString(R.string.status_value_vpn_failed),
-                    getString(R.string.error_runtime_start_failed) + ": " + exception.getMessage()
+                    getString(R.string.error_runtime_start_failed) + ": " + enrichRuntimeFailureDetail(exception.getMessage())
             );
             stopForeground(STOP_FOREGROUND_REMOVE);
             stopSelf();
@@ -199,13 +208,14 @@ public class XrayVpnService extends VpnService {
             xrayProcess.destroy();
             xrayProcess = null;
         }
-        if (tunFd >= 0) {
+        currentLogFile = null;
+        if (tunInterfaceHandle != null) {
             try {
-                ParcelFileDescriptor.adoptFd(tunFd).close();
+                tunInterfaceHandle.close();
             } catch (Exception ignored) {
                 // already closed
             }
-            tunFd = -1;
+            tunInterfaceHandle = null;
         }
         stopping = false;
     }
@@ -219,7 +229,7 @@ public class XrayVpnService extends VpnService {
                     RuntimePreferences.markStopped(
                             XrayVpnService.this,
                             getString(R.string.status_value_vpn_failed),
-                            getString(R.string.error_runtime_start_failed) + ": exit " + exitCode
+                            getString(R.string.error_runtime_start_failed) + ": " + buildExitDetail(exitCode)
                     );
                     stopForeground(STOP_FOREGROUND_REMOVE);
                     stopSelf();
@@ -235,16 +245,17 @@ public class XrayVpnService extends VpnService {
     private void pumpLog(InputStream inputStream, File logFile) {
         Thread thread = new Thread(() -> {
             try (
-                    InputStreamReader reader = new InputStreamReader(inputStream, StandardCharsets.UTF_8);
+                    BufferedReader reader = new BufferedReader(new InputStreamReader(inputStream, StandardCharsets.UTF_8));
                     BufferedWriter writer = new BufferedWriter(
                             new OutputStreamWriter(new FileOutputStream(logFile, true), StandardCharsets.UTF_8)
                     )
             ) {
-                char[] buffer = new char[2048];
-                int read;
-                while ((read = reader.read(buffer)) >= 0) {
-                    writer.write(buffer, 0, read);
+                String line;
+                while ((line = reader.readLine()) != null) {
+                    writer.write(line);
+                    writer.newLine();
                     writer.flush();
+                    Log.i(TAG, line);
                 }
             } catch (Exception ignored) {
                 // runtime log is best effort only
@@ -291,6 +302,20 @@ public class XrayVpnService extends VpnService {
         throw new IllegalStateException(getString(R.string.error_runtime_unsupported_abi));
     }
 
+    private Process startProcessWithTunOnStdin(ProcessBuilder processBuilder, ParcelFileDescriptor tunInterface) throws Exception {
+        FileDescriptor stdinBackup = Os.dup(FileDescriptor.in);
+        try {
+            Os.dup2(tunInterface.getFileDescriptor(), 0);
+            return processBuilder.start();
+        } finally {
+            try {
+                Os.dup2(stdinBackup, 0);
+            } finally {
+                Os.close(stdinBackup);
+            }
+        }
+    }
+
     private Notification buildNotification(String contentText) {
         Intent openIntent = new Intent(this, MainActivity.class);
         openIntent.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP | Intent.FLAG_ACTIVITY_SINGLE_TOP);
@@ -333,5 +358,45 @@ public class XrayVpnService extends VpnService {
         if (manager != null) {
             manager.createNotificationChannel(channel);
         }
+    }
+
+    private String buildExitDetail(int exitCode) {
+        String tail = readRuntimeLogTail();
+        if (!tail.isEmpty()) {
+            return "exit " + exitCode + " · " + tail;
+        }
+        return "exit " + exitCode;
+    }
+
+    private String enrichRuntimeFailureDetail(String detail) {
+        String tail = readRuntimeLogTail();
+        if (tail.isEmpty()) {
+            return detail;
+        }
+        if (detail == null || detail.trim().isEmpty()) {
+            return tail;
+        }
+        return detail + " · " + tail;
+    }
+
+    private String readRuntimeLogTail() {
+        File logFile = currentLogFile;
+        if (logFile == null || !logFile.isFile()) {
+            return "";
+        }
+        String lastLine = "";
+        try (BufferedReader reader = new BufferedReader(
+                new InputStreamReader(new FileInputStream(logFile), StandardCharsets.UTF_8)
+        )) {
+            String line;
+            while ((line = reader.readLine()) != null) {
+                if (!line.trim().isEmpty()) {
+                    lastLine = line.trim();
+                }
+            }
+        } catch (Exception ignored) {
+            return "";
+        }
+        return lastLine;
     }
 }
